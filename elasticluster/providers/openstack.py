@@ -808,7 +808,6 @@ class OpenStackCloudProvider(AbstractCloudProvider):
         """
         self._init_os_api()
         with OpenStackCloudProvider.__node_start_lock:
-            ip_address = None
             # for some obscure reason, using `fixed_ip_address=None` in the
             # call to `list_floatingips()` returns *no* results (not even,
             # in fact, those with `fixed_ip_address: None`) whereas
@@ -817,10 +816,12 @@ class OpenStackCloudProvider(AbstractCloudProvider):
             free_ips = [
                 ip for ip in
                 self.neutron_client.list_floatingips(fixed_ip_address='').get('floatingips')
-                if ip['fixed_ip_address'] is None
+                if (ip['fixed_ip_address'] is None
+                    and ip['floating_network_id'] in network_ids
+                    and ip['port_id'] is None)
             ]
             if free_ips:
-                ip_address = free_ips.pop()
+                floating_ip = free_ips.pop()
             else:
                 # FIXME: OpenStack Network API v2 requires that we specify
                 # a network ID along with the request for a floating IP.
@@ -837,31 +838,77 @@ class OpenStackCloudProvider(AbstractCloudProvider):
                     log.debug(
                         "Trying to allocate floating IP on network %s ...", network_id)
                     try:
-                        resp = self.neutron_client.create_floatingip({
+                        floating_ip = self.neutron_client.create_floatingip({
                             'floatingip': {
                                 'floating_network_id':network_id,
                             }}).get('floatingip')
-                        ip_address = resp['floating_ip_address']
-                        log.debug("Allocated IP address %s on network %s", ip_address, network_id)
+                        log.debug(
+                            "Allocated IP address %s on network %s",
+                            floating_ip['floating_ip_address'], network_id)
                         break  # stop at first network where we get a floating IP
                     except BadNeutronRequest as err:
-                        log.debug(
-                            "Failed allocating floating IP on network %s: %s",
-                            network_id, err)
-            if ip_address is None:
+                        raise RuntimeError(
+                            "Failed allocating floating IP on network {0}: {1}"
+                            .format(network_id, err))
+            if floating_ip.get('floating_ip_address', None) is None:
                 raise RuntimeError(
                     "Could not allocate floating IP for VM {0}"
                     .format(instance_id))
+            # wait until at least one interface is up
+            interfaces = []
+            # FIXMEE: no timeout!
+            while not interfaces:
+                interfaces = instance.interface_list()
+                sleep(2)  ## FIXME: hard-coded value
             # get port ID
-            port_id = self.nova_client.interface_list(instance.id)  # FIXMEEE
+            for interface in interfaces:
+                log.debug(
+                    "Instance %s (ID: %s):"
+                    " Checking if floating IP can be attached to interface %r ...",
+                    instance.name, instance.id, interface)
+                if interface.net_id not in network_ids:
+                    log.debug(
+                        "Instance %s (ID: %s):"
+                        " Skipping interface %r:"
+                        " not attached to any of the requested networks.",
+                        instance.name, instance.id, interface)
+                    continue
+                port_id = interface.port_id
+                if port_id is None:
+                    log.debug(
+                        "Instance %s (ID: %s):"
+                        " Skipping interface %r: no port ID!",
+                        instance.name, instance.id, interface)
+                    continue
+                log.debug(
+                    "Instance `%s` (ID: %s):"
+                    " will assign floating IP to port ID %s (state: %s),"
+                    " already running IP addresses %r",
+                    instance.name, instance.id,
+                    port_id, interface.port_state,
+                    [item['ip_address'] for item in interface.fixed_ips])
+                if interface.port_state != 'ACTIVE':
+                    log.warn(
+                        "Instance `%s` (ID: %s):"
+                        " port `%s` is in state %s (epected 'ACTIVE' instead)",
+                        instance.name, instance.id,
+                        port_id, interface.port_state)
+                break
+            else:
+                raise RuntimeError(
+                    "Could not find port on network(s) {0}"
+                    " for instance {1} (ID: {2}) to bind a floating IP to."
+                    .format(network_ids, instance.name, instance.id))
             # assign floating IP to port
-            resp = self.neutron_client.update_floatingip({
-                'floatingip': {
-                    'id': ...,  # FIXMEEE
-                    'port': port_id,
-                }}).get('floatingip')
-            ip_address = resp['floating_ip_address']
-            log.debug("Assigned IP address %s to port %s", ip_address, network_id)
+            floating_ip = self.neutron_client.update_floatingip(
+                floating_ip, {
+                    'floatingip_id': floating_ip['id'],
+                    'floatingip': {
+                        'port_id': port_id,
+                    },
+                }).get('floatingip')
+            ip_address = floating_ip['floating_ip_address']
+            log.debug("Assigned IP address %s to port %s", ip_address, port_id)
         return ip_address
 
 
