@@ -3,7 +3,7 @@
 # @(#)openstack.py
 #
 #
-# Copyright (C) 2013, 2015 S3IT, University of Zurich. All rights reserved.
+# Copyright (C) 2013, 2015, 2018 University of Zurich. All rights reserved.
 #
 #
 # This program is free software; you can redistribute it and/or modify it
@@ -829,7 +829,7 @@ class OpenStackCloudProvider(AbstractCloudProvider):
                 # networks to be connected to a VM, but does not give any
                 # hint as to which one(s) should be used for such requests.
                 # So we try them all, ignoring errors until one request
-                # succeeds and hope that it's the OK. One can imagine
+                # succeeds and hope that it's OK. One can imagine
                 # scenarios where this is *not* correct, but: (1) these
                 # scenarios are unlikely, and (2) the old novaclient code
                 # above has not even had the concept of multiple networks
