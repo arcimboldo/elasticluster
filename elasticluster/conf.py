@@ -105,6 +105,7 @@ SCHEMA = {
         'nodes': {
             str: {
                 'flavor': nonempty_str,
+                Optional('floating_network_id'): str,
                 'image_id': nonempty_str,
                 Optional('image_userdata', default=''): str,
                 Optional('security_group', default='default'): str,  ## FIXME: alphanumeric?
@@ -662,6 +663,7 @@ def _gather_node_kind_info(kind_name, cluster_name, cluster_conf):
     kind_values = {}
     for attr in (
             'flavor',
+            'floating_network_id',
             'image_id',
             #'image_user',       ## from `login/*`
             'image_userdata',

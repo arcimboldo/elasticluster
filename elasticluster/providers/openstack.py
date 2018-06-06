@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-#
-# @(#)openstack.py
-#
 #
 # Copyright (C) 2013, 2015, 2018 University of Zurich. All rights reserved.
 #
@@ -450,6 +448,10 @@ class OpenStackCloudProvider(AbstractCloudProvider):
 
         network_ids = [net_id.strip()
                        for net_id in kwargs.pop('network_ids', '').split(',')]
+        if 'floating_network_id' in kwargs:
+            floating_networks = [kwargs.pop('floating_network_id')]
+        else:
+            floating_networks = network_ids[:]
         if network_ids:
             nics = [{'net-id': net_id, 'v4-fixed-ip': ''}
                     for net_id in network_ids ]
@@ -506,6 +508,23 @@ class OpenStackCloudProvider(AbstractCloudProvider):
 
         # allocate and attach a floating IP, if requested
         if self.request_floating_ip:
+
+            # wait for server to come up (otherwise floating IP can't be associated)
+            log.info("Waiting for instance `%s` (%s) to come up ...", node_name, vm.id)
+            max_wait = int(kwargs.get('max_wait', 300))
+            waited = 0
+            while waited < max_wait:
+                if vm.status == 'ACTIVE':
+                    break
+                vm = self.nova_client.servers.get(vm.id)
+                # FIXME: Configurable poll interval
+                sleep(3)
+                waited += 3
+            else:
+                raise RuntimeError(
+                    "VM {0} didn't come up in {1:d} seconds"
+                    .format(vm.id, max_wait))
+
             # We need to list the floating IPs for this instance
             try:
                 # python-novaclient <8.0.0
@@ -518,7 +537,7 @@ class OpenStackCloudProvider(AbstractCloudProvider):
                     .get('floating_ips', []))
             # allocate new floating IP if none given
             if not floating_ips:
-                self._allocate_address(vm, network_ids)
+                self._allocate_address(vm, floating_networks)
             else:
                 log.debug("VM `%s` already allocated floating IPs: %r", vm.id, floating_ips)
 
@@ -866,13 +885,13 @@ class OpenStackCloudProvider(AbstractCloudProvider):
                     "Instance %s (ID: %s):"
                     " Checking if floating IP can be attached to interface %r ...",
                     instance.name, instance.id, interface)
-                if interface.net_id not in network_ids:
-                    log.debug(
-                        "Instance %s (ID: %s):"
-                        " Skipping interface %r:"
-                        " not attached to any of the requested networks.",
-                        instance.name, instance.id, interface)
-                    continue
+                # if interface.net_id not in network_ids:
+                #     log.debug(
+                #         "Instance %s (ID: %s):"
+                #         " Skipping interface %r:"
+                #         " not attached to any of the requested networks.",
+                #         instance.name, instance.id, interface)
+                #     continue
                 port_id = interface.port_id
                 if port_id is None:
                     log.debug(
@@ -901,12 +920,11 @@ class OpenStackCloudProvider(AbstractCloudProvider):
                     .format(network_ids, instance.name, instance.id))
             # assign floating IP to port
             floating_ip = self.neutron_client.update_floatingip(
-                floating_ip, {
-                    'floatingip_id': floating_ip['id'],
-                    'floatingip': {
-                        'port_id': port_id,
-                    },
-                }).get('floatingip')
+                floating_ip,
+                'floatingip': {
+                    'port_id': port_id,
+                },
+            }).get('floatingip')
             ip_address = floating_ip['floating_ip_address']
             log.debug("Assigned IP address %s to port %s", ip_address, port_id)
         return ip_address
