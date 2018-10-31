@@ -563,8 +563,14 @@ class OpenStackCloudProvider(AbstractCloudProvider):
         """
         self._init_os_api()
         instance = self._load_instance(instance_id)
-        IPs = sum(instance.networks.values(), [])
-        return IPs
+        try:
+            ip_addrs = set([self.floating_ip])
+        except AttributeError:
+            ip_addrs = set([])
+        for ip_addr in sum(instance.networks.values(), []):
+            ip_addrs.add(ip_addr)
+        log.debug("VM `%s` has IP addresses %r", instance_id, ip_addrs)
+        return list(ip_addrs)
 
     def is_instance_running(self, instance_id):
         """Checks if the instance is up and running.
