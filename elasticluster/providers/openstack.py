@@ -920,8 +920,8 @@ class OpenStackCloudProvider(AbstractCloudProvider):
                     .format(network_ids, instance.name, instance.id))
             # assign floating IP to port
             floating_ip = self.neutron_client.update_floatingip(
-                floating_ip,
-                'floatingip': {
+                floating_ip['id'],
+                {'floatingip': {
                     'port_id': port_id,
                 },
             }).get('floatingip')
