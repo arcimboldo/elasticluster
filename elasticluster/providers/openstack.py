@@ -537,7 +537,8 @@ class OpenStackCloudProvider(AbstractCloudProvider):
                     .get('floating_ips', []))
             # allocate new floating IP if none given
             if not floating_ips:
-                self._allocate_address(vm, floating_networks)
+                ip_addr = self._allocate_address(vm, floating_networks)
+                log.debug("VM `%s` was allocated floating IP: %r", vm.id, ip_addr)
             else:
                 log.debug("VM `%s` already allocated floating IPs: %r", vm.id, floating_ips)
 
