@@ -934,6 +934,17 @@ class OpenStackCloudProvider(AbstractCloudProvider):
             }).get('floatingip')
             ip_address = floating_ip['floating_ip_address']
             log.debug("Assigned IP address %s to port %s", ip_address, port_id)
+
+            log.info("Waiting 300s until floating IP %s is ACTIVE", ip_address)
+            for i in range(300):
+                _floating_ip = self.neutron_client.show_floatingip(floating_ip['id'])
+                if _floating_ip['floatingip']['status'] != 'DOWN':
+                    break
+                sleep(1)
+
+            # Invalidate cache for this VM, as we just assigned a new IP
+            if instance.id in self._cached_instances[]:
+                del self._cached_instances[instance.id]
         return ip_address
 
 
